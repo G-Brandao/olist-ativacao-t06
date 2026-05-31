@@ -1,0 +1,14 @@
+# Banco SQLite de validação local (gerado por scripts/build_sqlite.py)
+olist.db
+*.db
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Saídas locais
+*.parquet
