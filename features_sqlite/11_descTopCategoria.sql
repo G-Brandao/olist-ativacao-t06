@@ -1,0 +1,127 @@
+-- =====================================================================
+-- descTopCategoria{1,2,3}  (variaveis.md §7) — Top 3 categorias do seller
+-- Janelas: D28, D56, D365, Vida   |   Grão de saída: 1 linha por seller_id
+-- Dialeto: SQLite (validação local)
+-- ---------------------------------------------------------------------
+-- Colunas  : descTopCategoria{1,2,3}{D28,D56,D365,Vida}  (12 colunas)
+-- Definição: nome da 1ª/2ª/3ª categoria MAIS VENDIDA do seller na janela.
+-- ---------------------------------------------------------------------
+-- CRITÉRIO (variaveis.md §7): ranking por QUANTIDADE VENDIDA = nº de itens
+--   vendidos (linhas de order_items) na categoria. Desempate determinístico:
+--   unidades DESC -> pedidos distintos DESC -> categoria ASC. Usamos
+--   ROW_NUMBER (não RANK) p/ garantir 1 categoria por posição.
+-- Grão     : entidade = SELLER; agregamos por (seller, categoria) e a
+--   "unidade vendida" é a linha de venda (cada item conta).
+-- Data     : order_purchase_timestamp < {data_corte}.
+-- Nulos    : categoria NULL -> 'sem_categoria' (pode figurar no top); seller
+--   com <k categorias na janela -> posição k NULL (guard u_>0).
+-- Parâmetro: {data_corte} (ex. 2018-07-01).
+-- =====================================================================
+
+-- 1) vendas: itens vendidos até o corte, com categoria, pedido e data.
+WITH vendas AS (
+    SELECT oi.seller_id,
+           COALESCE(p.product_category_name, 'sem_categoria') AS categoria,
+           oi.order_id,
+           o.order_purchase_timestamp                         AS dt_venda
+    FROM order_items oi
+    JOIN orders       o ON o.order_id   = oi.order_id
+    LEFT JOIN products p ON p.product_id = oi.product_id
+    WHERE o.order_purchase_timestamp < '{data_corte}'
+),
+-- 2) por (seller, categoria): unidades vendidas e pedidos distintos por janela.
+cat_base AS (
+    SELECT seller_id, categoria,
+        SUM(CASE WHEN dt_venda >= datetime('{data_corte}','-28 days')  THEN 1 ELSE 0 END)        AS u_d28,
+        COUNT(DISTINCT CASE WHEN dt_venda >= datetime('{data_corte}','-28 days')  THEN order_id END) AS p_d28,
+        SUM(CASE WHEN dt_venda >= datetime('{data_corte}','-56 days')  THEN 1 ELSE 0 END)        AS u_d56,
+        COUNT(DISTINCT CASE WHEN dt_venda >= datetime('{data_corte}','-56 days')  THEN order_id END) AS p_d56,
+        SUM(CASE WHEN dt_venda >= datetime('{data_corte}','-365 days') THEN 1 ELSE 0 END)        AS u_d365,
+        COUNT(DISTINCT CASE WHEN dt_venda >= datetime('{data_corte}','-365 days') THEN order_id END) AS p_d365,
+        COUNT(*)                                                                                 AS u_vida,
+        COUNT(DISTINCT order_id)                                                                 AS p_vida
+    FROM vendas
+    GROUP BY seller_id, categoria
+),
+-- 3) ranking por janela (unidades DESC -> pedidos DESC -> categoria ASC).
+rk AS (
+    SELECT seller_id, categoria, u_d28, u_d56, u_d365, u_vida,
+        ROW_NUMBER() OVER (PARTITION BY seller_id ORDER BY u_d28  DESC, p_d28  DESC, categoria ASC) AS rk_d28,
+        ROW_NUMBER() OVER (PARTITION BY seller_id ORDER BY u_d56  DESC, p_d56  DESC, categoria ASC) AS rk_d56,
+        ROW_NUMBER() OVER (PARTITION BY seller_id ORDER BY u_d365 DESC, p_d365 DESC, categoria ASC) AS rk_d365,
+        ROW_NUMBER() OVER (PARTITION BY seller_id ORDER BY u_vida DESC, p_vida DESC, categoria ASC) AS rk_vida
+    FROM cat_base
+)
+-- 4) pivota nome por posição × janela. "u_>0" evita rotular janela sem venda.
+SELECT
+    seller_id,
+    MAX(CASE WHEN rk_d28 =1 AND u_d28 >0 THEN categoria END) AS descTopCategoria1D28,
+    MAX(CASE WHEN rk_d56 =1 AND u_d56 >0 THEN categoria END) AS descTopCategoria1D56,
+    MAX(CASE WHEN rk_d365=1 AND u_d365>0 THEN categoria END) AS descTopCategoria1D365,
+    MAX(CASE WHEN rk_vida=1 AND u_vida>0 THEN categoria END) AS descTopCategoria1Vida,
+    MAX(CASE WHEN rk_d28 =2 AND u_d28 >0 THEN categoria END) AS descTopCategoria2D28,
+    MAX(CASE WHEN rk_d56 =2 AND u_d56 >0 THEN categoria END) AS descTopCategoria2D56,
+    MAX(CASE WHEN rk_d365=2 AND u_d365>0 THEN categoria END) AS descTopCategoria2D365,
+    MAX(CASE WHEN rk_vida=2 AND u_vida>0 THEN categoria END) AS descTopCategoria2Vida,
+    MAX(CASE WHEN rk_d28 =3 AND u_d28 >0 THEN categoria END) AS descTopCategoria3D28,
+    MAX(CASE WHEN rk_d56 =3 AND u_d56 >0 THEN categoria END) AS descTopCategoria3D56,
+    MAX(CASE WHEN rk_d365=3 AND u_d365>0 THEN categoria END) AS descTopCategoria3D365,
+    MAX(CASE WHEN rk_vida=3 AND u_vida>0 THEN categoria END) AS descTopCategoria3Vida
+FROM rk
+GROUP BY seller_id;
+
+-- ====================== ANÁLISE / PROVAS DA DECISÃO (rodar manualmente) ======================
+-- A feature é o bloco 1; as provas começam no bloco 2. Rode com:
+--   python scripts/run_feature_sqlite.py <este_arquivo> --list
+--   python scripts/run_feature_sqlite.py <este_arquivo> --block 2
+-- =============================================================================================
+
+-- ----------------------- Prova A — ranking COMPLETO por unidades (Vida), com desempate -----------------------
+-- Mostra unidades, pedidos e o ROW_NUMBER antes do pivot top1/2/3.
+WITH vendas AS (
+    SELECT oi.seller_id, COALESCE(p.product_category_name,'sem_categoria') AS categoria, oi.order_id
+    FROM order_items oi
+    JOIN orders o ON o.order_id = oi.order_id
+    LEFT JOIN products p ON p.product_id = oi.product_id
+    WHERE o.order_purchase_timestamp < '{data_corte}'
+),
+cat AS (
+    SELECT seller_id, categoria, COUNT(*) AS unidades, COUNT(DISTINCT order_id) AS pedidos
+    FROM vendas GROUP BY seller_id, categoria
+)
+SELECT seller_id, categoria, unidades, pedidos,
+       ROW_NUMBER() OVER (PARTITION BY seller_id ORDER BY unidades DESC, pedidos DESC, categoria ASC) AS rk
+FROM cat
+ORDER BY seller_id, rk
+LIMIT 50;
+
+-- ----------------------- Prova B — unidades (linhas) vs pedidos distintos divergem? (justifica COUNT(*) p/ "vendido") -----------------------
+-- Mesma categoria pode ter vários itens no mesmo pedido: unidades > pedidos.
+WITH vendas AS (
+    SELECT oi.seller_id, COALESCE(p.product_category_name,'sem_categoria') AS categoria, oi.order_id
+    FROM order_items oi
+    JOIN orders o ON o.order_id = oi.order_id
+    LEFT JOIN products p ON p.product_id = oi.product_id
+    WHERE o.order_purchase_timestamp < '{data_corte}'
+)
+SELECT seller_id, categoria, COUNT(*) AS unidades, COUNT(DISTINCT order_id) AS pedidos
+FROM vendas
+GROUP BY seller_id, categoria
+HAVING COUNT(*) > COUNT(DISTINCT order_id)
+ORDER BY unidades DESC
+LIMIT 20;
+
+-- ----------------------- Prova C — distribuição do nº de categorias por seller (<3 -> top2/top3 NULL) -----------------------
+WITH cat_por_seller AS (
+    SELECT oi.seller_id,
+           COUNT(DISTINCT COALESCE(p.product_category_name,'sem_categoria')) AS n_categorias
+    FROM order_items oi
+    JOIN orders o ON o.order_id = oi.order_id
+    LEFT JOIN products p ON p.product_id = oi.product_id
+    WHERE o.order_purchase_timestamp < '{data_corte}'
+    GROUP BY oi.seller_id
+)
+SELECT n_categorias, COUNT(*) AS qtd_sellers
+FROM cat_por_seller
+GROUP BY n_categorias
+ORDER BY n_categorias;

@@ -7,9 +7,11 @@ probabilidade de **não realizar nenhuma venda no próximo mês (X+1)**. A previ
 roda no último dia útil do mês X; as features usam todo o histórico com
 `order_purchase_timestamp < {data_corte}`.
 
-Esta entrega são os **scripts de feature engineering por variável** (lista em
-[`variaveis.md`](variaveis.md)), validados em **SQLite** e traduzidos para
-**Spark SQL (Databricks)**.
+Esta entrega são os **scripts de feature engineering por variável** (lista e
+convenção de nomenclatura em [`variaveis.md`](variaveis.md)), validados em
+**SQLite** e traduzidos para **Spark SQL (Databricks)**. São **12 scripts** por
+dialeto, um por família de variável, nomeados pelo nome oficial da variável
+(ex.: `07_vlPesoProduto.sql`).
 
 ## Documentação principal
 
@@ -36,7 +38,7 @@ Os scripts Spark diferem dos de SQLite **apenas** por: (1) prefixo de namespace
 olist-ativacao-t06/
 ├── README.md                      # este arquivo
 ├── CLAUDE.md                      # contexto + planejamento/progresso
-├── variaveis.md                   # lista original das 14 variáveis (input)
+├── variaveis.md                   # lista de variáveis + convenção de nomes (input)
 ├── brazilian-ecommerce-metadata.json
 ├── dados/                         # 9 CSVs do Kaggle (cada CSV = uma tabela)
 ├── docs/
@@ -46,14 +48,18 @@ olist-ativacao-t06/
 │   ├── build_sqlite.py            # CSVs (dados/) -> olist.db
 │   ├── run_feature_sqlite.py      # roda/valida um .sql contra olist.db
 │   └── build_notebook.py          # (re)gera o analise_variaveis.ipynb a partir dos .sql
-├── features_sqlite/               # 14 scripts validados (SQLite) — 1 por variável
-│   └── 01_..._14_...sql
-└── features_spark/                # 14 scripts equivalentes (Spark SQL, workspace.olist.*)
-    └── 01_..._14_...sql
+├── features_sqlite/               # 12 scripts validados (SQLite) — 1 por família
+│   └── 01_vlCategoriasDistintas.sql … 12_vlShareTopCategoria.sql
+└── features_spark/                # 12 scripts equivalentes (Spark SQL, workspace.olist.*)
+    └── 01_vlCategoriasDistintas.sql … 12_vlShareTopCategoria.sql
 ```
 
-Cada arquivo cobre **uma variável** com as **4 janelas** (`_d28/_d56/_d365/_vida`)
-no mesmo script, quando aplicável.
+Cada arquivo cobre **uma família de variável** com as **4 janelas**
+(`D28/D56/D365/Vida`) e as colunas no nome oficial da convenção (`vl…`/`desc…`),
+quando aplicável. São **estáticas** (só Vida, sem sufixo) as métricas de
+**atributo imutável do produto**: descrição, fotos e a **distribuição** de peso e
+cubagem. Os **totais** de peso/cubagem (massa/volume embarcado) e os demais
+mantêm as 4 janelas.
 
 ## Como executar
 
@@ -67,7 +73,7 @@ Os 9 CSVs do dataset já estão em [`dados/`](dados/).
 python scripts/build_sqlite.py
 
 # roda/inspeciona qualquer feature (substitui {data_corte} e valida)
-python scripts/run_feature_sqlite.py features_sqlite/01_qtd_categorias_distintas.sql --cutoff 2018-09-01
+python scripts/run_feature_sqlite.py features_sqlite/01_vlCategoriasDistintas.sql --cutoff 2018-07-01
 ```
 
 Ou abra **[`analise_variaveis.ipynb`](analise_variaveis.ipynb)** e rode célula a
@@ -82,7 +88,7 @@ Em um notebook do Databricks, abra/cole o script desejado e rode — cada
 `:data_corte`:
 
 ```sql
-CREATE WIDGET TEXT data_corte DEFAULT '2018-09-01';   -- já vem no topo do script
+CREATE WIDGET TEXT data_corte DEFAULT '2018-07-01';   -- já vem no topo do script
 -- ... WHERE order_purchase_timestamp < timestamp(:data_corte)
 ```
 
@@ -101,8 +107,9 @@ Ponto único de troca em cada dialeto: **SQLite** usa o token `'{data_corte}'`
 (substituído pelo runner via `--cutoff`); **Spark/Databricks** usa o widget
 `data_corte` lido por `:data_corte`. Semântica: **estrito**
 `order_purchase_timestamp < <corte>`. Usar a **primeira data do mês X+1** como
-corte equivale a "fotografar ao fim do mês X". Default de teste: `2018-09-01`
-(dados vão de set/2016 a out/2018).
+corte equivale a "fotografar ao fim do mês X". Default de teste: `2018-07-01`
+(janela definida pelo Téo; dados vão de set/2016 a out/2018). Nesse corte há
+**2.750 sellers** com ≥1 venda no histórico.
 
 ## Decisões de modelagem (resumo)
 
@@ -113,13 +120,23 @@ corte equivale a "fotografar ao fim do mês X". Default de teste: `2018-09-01`
   `order_status`.
 - **Grão:** 1 linha por `seller_id` em um `{data_corte}` parametrizado.
 - **Universo:** sellers com ≥1 venda antes do corte.
+- **Características de produto (descrição, fotos, peso, cubagem):** estatísticas
+  de distribuição (média/mediana/percentis/min/max) usam **produtos distintos
+  por seller** (`DISTINCT product_id`), para o mesmo SKU vendido em vários
+  pedidos não enviesar. Como são **atributos imutáveis** do produto, a
+  distribuição é **estática** (não varia no tempo → sem janela). Já **totais** de
+  peso/cubagem e **razões R$/kg** somam por **unidade vendida** (massa/volume
+  embarcados, receita e frete reais) e **mantêm as 4 janelas**. **Descrição e
+  fotos NULL contam como 0** (produto sem cadastro entra e puxa média/mínimo).
+- **Top 3 categorias e share:** ranking por **quantidade vendida** (unidades);
+  share = unidades da categoria / unidades totais da janela.
 - Demais premissas (janelas, nulos, percentis, desempates) em
   [docs/variaveis_detalhadas.md](docs/variaveis_detalhadas.md) §3.
 
 ## O que está / não está no escopo
 
-**Está:** as 14 variáveis de `variaveis.md` em SQLite + Spark, documentadas e
-validadas localmente.
+**Está:** as variáveis de `variaveis.md` (12 scripts por dialeto) em SQLite +
+Spark, documentadas e validadas localmente.
 
 **Não está (próximos passos):** definição/cálculo do **alvo** de churn (vender ou
 não em X+1), montagem da feature store larga, treino do modelo.

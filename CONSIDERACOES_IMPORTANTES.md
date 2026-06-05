@@ -4,6 +4,11 @@ Decisões metodológicas que **não são óbvias no código** e podem gerar
 mal-entendidos se não estiverem explícitas. Leia antes de alterar janelas de
 tempo, o parâmetro de corte ou a definição de "venda".
 
+> **Nota (v2):** o corte default passou a ser **`2018-07-01`** (janela definida
+> pelo Téo; 2.750 sellers). A mecânica de janela abaixo é **independente do corte**;
+> os números ilustrativos da §1.2 foram medidos no corte antigo `2018-09-01` e
+> permanecem só como exemplo do comportamento (fronteiras, semiaberto à direita).
+
 ---
 
 ## 1. Estratégia de corte de data — `datetime('{data_corte}', '-28 days')`
