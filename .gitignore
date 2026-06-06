@@ -12,3 +12,15 @@ venv/
 
 # Saídas locais
 *.parquet
+*.db
+CLAUDE.md
+/features_sqlite/
+/features_spark/
+/dados/
+/docs/
+/scripts/
+/analise_variaveis.ipynb
+/brazilian-ecommerce-metadata.json
+/variaveis.md
+/README.md
+/CLAUDE.md
