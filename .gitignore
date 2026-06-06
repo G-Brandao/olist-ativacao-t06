@@ -15,7 +15,7 @@ venv/
 *.db
 CLAUDE.md
 /features_sqlite/
-/features_spark/
+
 /dados/
 /docs/
 /scripts/
