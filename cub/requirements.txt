@@ -1,0 +1,7 @@
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.0
+# opcional — apenas para fontes publicadas em PDF (parser ainda não implementado)
+# pdfplumber>=0.11
+# dev
+pytest>=8.0
